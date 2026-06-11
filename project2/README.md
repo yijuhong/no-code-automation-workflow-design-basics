@@ -24,7 +24,7 @@
 
 **선정 도구:** Make
 
-**알림 채널:** Slack `#automation-test`
+**알림 채널:** 정상 처리 결과는 Slack `#automation-test`, 실패 알림은 Gmail
 
 **이번 PR 범위:** 워크플로우 설계 문서 작성
 
@@ -159,18 +159,30 @@ AI Action은 Make `Simple Text Prompt` 모듈로 구성한다. Custom AI provide
 담당자: {{담당자}}
 ```
 
-## 11. 실패 알림 및 재실행 전략
+## 11. 실패 알림 및 재시도 전략
 
-후속 구현에서는 Slack 전송 또는 Google Sheets 기록 단계에서 오류가 발생했을 때 확인 가능한 실패 대응 흐름을 구성한다.
+후속 구현에서는 `Simple Text Prompt`, Google Sheets 기록, Slack 알림 단계에서 오류가 발생했을 때 Gmail 실패 알림, Google Sheets 실패 로그, 자동 재시도, 대체 시트 적재 경로를 함께 구성한다.
+
+오류 처리 경로는 정상 처리 경로와 분리한다. 정상 처리 결과는 Slack `#automation-test`에 공유하고, 실패 알림은 Slack 자체 장애나 Slack 전송 실패에도 확인할 수 있도록 Gmail로 발송한다.
 
 | 상황 | 대응 전략 |
 | --- | --- |
-| Slack 알림 실패 | Slack 실패 알림 경로를 설정해 `#automation-test`에 실패 메시지를 보내는 것을 우선한다. |
-| Google Sheets 기록 실패 | Make incomplete execution에 실패 실행을 남기고 원인을 확인한 뒤 수동 재실행한다. |
-| 일시적 연결 오류 | Make incomplete execution의 retry 또는 수동 재실행으로 같은 입력값을 다시 처리한다. |
-| Slack 자체 장애 | Slack 알림에 의존하지 않고 Make 실행 이력과 incomplete execution에서 실패 여부를 확인한다. |
+| Simple Text Prompt 실패 | AI 요약 실패로 분류하고 Gmail로 실패 알림을 보낸 뒤 Google Sheets `실패 로그` 탭에 실행 정보를 기록한다. |
+| Google Sheets 기록 실패 | 같은 입력값으로 1회 자동 재시도하고, 재시도 후에도 실패하면 Google Sheets `임시 적재` 탭에 원본 입력값을 저장한다. |
+| Slack 알림 실패 | Slack 대신 Gmail로 실패 알림을 보내고 Google Sheets `실패 로그` 탭에 Slack 전송 실패 상태를 기록한다. |
+| 일시적 연결 오류 | Make 오류 처리 경로에서 같은 입력값으로 1회 재시도한다. 재시도 후에도 실패하면 실패 로그와 Gmail 알림을 남긴다. |
+| Slack 자체 장애 | Slack 알림에 의존하지 않고 Gmail 실패 알림, Google Sheets `실패 로그`, Make 실행 이력에서 실패 여부를 확인한다. |
 
-실패 알림에는 회의명, 실패 모듈, 오류 확인 위치만 포함하고, API Key, 토큰, 계정 이메일 같은 민감정보는 포함하지 않는다.
+실패 알림에는 회의명, 실패 모듈, 오류 유형, Make 실행 이력 확인 위치만 포함한다. API Key, 토큰, 비밀번호, 전체 계정 이메일 같은 민감정보는 Gmail 본문과 Google Sheets 로그에 포함하지 않는다.
+
+Google Sheets에는 실패 대응용 탭을 2개 추가한다.
+
+| 탭 | 기록 내용 | 목적 |
+| --- | --- | --- |
+| `실패 로그` | 실행 시각, 회의명, 실패 모듈, 오류 유형, 처리 상태, 재시도 여부, Make 실행 이력 확인 위치 | 실패 원인 추적과 재처리 여부 확인 |
+| `임시 적재` | 회의명, 회의일시, 참석자, 회의록 본문, 결정사항, 후속작업, 담당자, 실패 시각 | 최종 기록 실패 시 원본 입력값 유실 방지 |
+
+재시도는 일시적 연결 오류나 외부 서비스 응답 지연처럼 같은 입력값으로 다시 실행했을 때 성공 가능성이 있는 오류에만 적용한다. 입력값 누락, 권한 오류, 연결 인증 만료처럼 설정 수정이 필요한 오류는 자동 재시도를 반복하지 않고 Gmail 실패 알림과 `실패 로그` 기록으로 중단한다.
 
 ## 12. 테스트 데이터 예시
 
